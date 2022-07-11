@@ -1,0 +1,6 @@
+/build
+launcher_accounts.json
+/bc
+/bungeecord
+node_modules
+.vscode
