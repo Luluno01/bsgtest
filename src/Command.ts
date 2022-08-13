@@ -50,6 +50,23 @@ export class Command extends Unreliable<BungeeCord> {
   protected onNewLine(line: string) {
     this.notify('line', line)
   }
+
+  public async exec(nLines: number = 1, { timeout = 1000, signal }: {
+    timeout?: number,
+    signal?: AbortSignal
+  } = {}) {
+    await this.start()
+    const ac = new AbortController
+    signal?.addEventListener('abort', ev => ac.abort(ev))
+    for await (const _ of this.asIterator('line', { timeout, signal: ac.signal })) {
+      if (--nLines <= 0) {
+        ac.abort()
+        break
+      }
+    }
+    this.stop()
+    return this.waitForState('stopped', 1000)
+  }
 }
 
 export default Command

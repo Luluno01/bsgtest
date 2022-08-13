@@ -51,7 +51,7 @@ export class List {
     return currentRecords < nUUID ? List.handleMainRecord : null
   }
 
-  public async get(bc: BungeeCord, cmdName: string) {
+  public async get(bc: BungeeCord, cmdName: string): Promise<[ string[], string[] ]> {
     const cmd = new Command(`${cmdName} ls\n`, bc)
     await cmd.start()
     const state = new ParseState

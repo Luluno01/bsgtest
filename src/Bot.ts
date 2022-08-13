@@ -44,6 +44,7 @@ export class Bot extends Unreliable<mineflayer.Bot> {
     this.options.username = name
     this.offlineId = uuidBufferToString(nameUUIDFromBytes('OfflinePlayer:' + name))
   }
+  public readonly trace: any[] = []
 
   constructor(options: BotOptions) {
     super()
@@ -70,6 +71,10 @@ export class Bot extends Unreliable<mineflayer.Bot> {
       .on('error', () => {})  // Mineflayer does not implement a mechanism to check the connection state, ignore future error anyway
       .end('death')
     super._onDeath(new BotError(reason))
+  }
+
+  public addTrace(op: any) {
+    this.trace.push(op)
   }
 }
 

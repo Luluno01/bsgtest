@@ -92,6 +92,13 @@ export class BungeeCord extends Proc {
     if (graceful) this._uObj!.stdin!.write('end\n')
     else super.stop()
   }
+
+  public async restart() {
+    this.stop(true)
+    await this.waitForState('stopped')
+    await this.start()
+    return this.waitForState('running')
+  }
 }
 
 export default BungeeCord

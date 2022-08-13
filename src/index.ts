@@ -2,20 +2,20 @@ import { createWriteStream, constants as fsConstants } from 'fs'
 import { access, copyFile, readdir } from 'fs/promises'
 import path from 'path'
 import { setTimeout } from 'timers/promises'
-import Bot from './Bot'
 import BungeeCord from './BungeeCord'
 import * as waterfall from './waterfall'
 import assert from 'assert'
 import List from './List'
+import print from './print'
+import Context from './tests/common/Context'
+import BotRegistry from './BotRegistry'
+import { BotFactory } from './BotFactory'
+import stats from './tests/common/Stats'
 
 
 const BC_WORK_DIR = 'bc'
 const HOST = 'localhost'
 const PORT = 25577
-
-function print(...args: any[]) {
-  console.log('>>>>', ...args)
-}
 
 async function prepareWaterfall() {
   const buildList = await waterfall.fetchBuilds()
@@ -64,54 +64,41 @@ async function ensureEmptyList(bc: BungeeCord) {
 interface Test {
   name: string
   expected: string
-  test: (bc: BungeeCord, botFactory: () => Bot) => Promise<void>
+  test: (ctx: Context) => Promise<void>
 }
 
-async function loadTests(dir: string): Promise<[ string, Test ][]> {
+async function loadTests(dir: string, enabledTests: string[]): Promise<[ string, Test ][]> {
   const base = path.dirname(__filename)
   const absDir = path.join(base, dir)
   const tests: Promise<[ string, Test ]>[] = []
-  for (const file of await readdir(absDir)) {
-    if (file.endsWith('.js')) {
-      tests.push((async () => {
-        const testPath = path.join(absDir, file)
-        let relTestPath = path.relative(base, testPath)
-        if (!relTestPath.startsWith('./')) relTestPath = './' + relTestPath
-        return [ relTestPath, await import(testPath) ]
-      })())
-    }
+  let entries: string[]
+  if (enabledTests.length) {
+    entries = enabledTests.map(name => `${name}.js`)
+  } else {
+    entries = (await readdir(absDir)).filter(name => name.endsWith('.js'))
+  }
+  for (const file of entries) {
+    tests.push((async () => {
+      const testPath = path.join(absDir, file)
+      let relTestPath = path.relative(base, testPath)
+      if (!relTestPath.startsWith('./')) relTestPath = './' + relTestPath
+      return [ relTestPath, await import(testPath) ]
+    })())
   }
   return Promise.all(tests)
 }
 
-class BotFactory {
-  private id = 0
-  public get() {
-    return new Bot({
-      host: HOST,
-      port: PORT,
-      username: `Bot_${this.id++}`,
-      checkTimeoutInterval: 60000,
-      logErrors: false
-    })
-  }
-
-  public toLambda() {
-    return this.get.bind(this)
-  }
-}
-
-class TestContext {
-  public botFactory = (new BotFactory).toLambda()
-  constructor(public bc: BungeeCord) {}
-}
-
-async function execTest({ bc, botFactory }: TestContext, testFile: string, test: Test) {
+async function execTest(ctx: Context, testFile: string, test: Test) {
   print('Starting test:', test.name)
   print('Expected outcome:', test.expected)
+  const start = Date.now()
   try {
-    await test.test(bc, botFactory)
+    await test.test(ctx)
+    print('Stats:', stats)
+    print('Took', (Date.now() - start) / 1000, 'seconds')
   } catch (err) {
+    print('Stats:', stats)
+    print('Took', (Date.now() - start) / 1000, 'seconds')
     print('Test failed:', test.name)
     print('Defined in file', testFile)
     throw err
@@ -119,6 +106,7 @@ async function execTest({ bc, botFactory }: TestContext, testFile: string, test:
 }
 
 async function main() {
+  const enabledTests = process.argv.slice(2)
   await checkEnv(BC_WORK_DIR)
   // Prepare test
   const [ wfJar, _ ] = await Promise.all([ prepareWaterfall(), prepareConfig() ])
@@ -128,25 +116,29 @@ async function main() {
   assert(bc.plugins.some(plugin => plugin == 'BungeeSafeguard'), 'BungeeSafeguard is not enabled')
   await setTimeout(500)
   await ensureEmptyList(bc)
-  const loadedTests = await loadTests('./tests')
-  const nTests = loadTests.length
+  const loadedTests = await loadTests('./tests', enabledTests)
+  const nTests = loadedTests.length
   print(nTests, 'tests loaded')
-  const ctx = new TestContext(bc)
-  for (const [ testFile, test ] of loadedTests) {
-    try {
+  const botReg = new BotRegistry(new BotFactory(HOST, PORT))
+  const ctx = new Context(bc, botReg)
+  const start = Date.now()
+  try {
+    for (const [ testFile, test ] of loadedTests) {
       await execTest(ctx, testFile, test)
-    } finally {
-      await setTimeout(500)
-      if (bc.stoppable) bc.stop(true)
-      try {
-        await bc.waitForState('stopped', 5000)
-        print('BungeeCord gracefully stopped')
-      } catch {
-        print('Force stopping BungeeCord')
-        bc.stop(false)
-        await bc.waitForState('stopped')
-      }
+      await setTimeout(1000)
     }
+  } finally {
+    await setTimeout(500)
+    if (bc.stoppable) bc.stop(true)
+    try {
+      await bc.waitForState('stopped', 5000)
+      print('BungeeCord gracefully stopped')
+    } catch {
+      print('Force stopping BungeeCord')
+      bc.stop(false)
+      await bc.waitForState('stopped')
+    }
+    print('Took', (Date.now() - start) / 1000, 'seconds in total')
   }
 }
 

@@ -18,6 +18,9 @@ export class BotPool {
   public minSize: number
   public maxSize: number
   protected eb = new EventBarrier
+  public get size() {
+    return this.pool.size
+  }
 
   constructor(bc: BungeeCord, minSize = 10, maxSize = 100) {
     assert(minSize >= 0)
@@ -26,6 +29,14 @@ export class BotPool {
     this.bc = bc
     this.maxSize = maxSize
     this.minSize = minSize
+  }
+
+  public import(bots: Iterable<Bot>) {
+    const { pool, maxSize } = this
+    for (const bot of bots) {
+      assert(pool.size < maxSize, `Max pool size (${maxSize}) reached`)
+      pool.set(bot, false)
+    }
   }
 
   protected _new(factory: () => Bot) {
@@ -56,11 +67,7 @@ export class BotPool {
    * @returns 
    */
   public get(factory: () => Bot, criteria: (bot: Bot) => boolean) {
-    const { pool, minSize, maxSize } = this
-    if (pool.size < minSize) {
-      // Create a new one anyway
-      return this._new(factory)
-    }
+    const { pool, maxSize } = this
     // Try to reuse
     for (const [ mBot, inUse ] of pool) {
       if (!inUse && criteria(mBot)) {
@@ -102,18 +109,21 @@ export class BotPool {
    */
   public async getOrWait(factory: () => Bot, criteria: (bot: Bot) => boolean) {
     try {
-      const bot = this.get(factory, criteria)
-      return bot
-    } catch {
+      return this.get(factory, criteria)
+    } catch (err) {
+      if (err !instanceof OutOfBotError) throw err
       const { eb } = this
       const bot = await eb.waitFor<Bot>('bot-available')
       if (criteria(bot)) {
         return bot
       }
       // Not what we want, just replace it with a new one
-      const newBot = this._replace(bot, factory)
-      return newBot
+      return this._replace(bot, factory)
     }
+  }
+
+  public getBots() {
+    return new Set(this.pool.keys())
   }
 }
 
